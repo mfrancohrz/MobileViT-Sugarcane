@@ -82,18 +82,6 @@ class Main:
                 print("\n✅ Reports and validation plots generated successfully.")
                 continue
 
-            # Legacy code for Keras models (Optional/Comparison)
-            
-            # trainer = Trainer(trainingData, validationData)
-            # model = trainer.builderModel(name, load_existing=True)
-            # if model is None:
-            #     model = trainer.builderModel(name)
-
-            # start_time = time.time()
-            # history = trainer.train(model, 200)
-            # end_time = time.time()
-            # trainer.save_model(model, name)
-
         print("✅ All requested models have been processed.")
 
 
@@ -122,20 +110,21 @@ if __name__ == "__main__":
 
     processor = Main(inputPath, outputPath, test_percentage, excluded_dirs)
     
-    # Uncomment the following line to run data augmentation (only needed once)
-    
-    # processor.execute()
+    # Check if preprocessing pipeline needs to be run (First time setup)
+    train_val_dir = os.path.join(outputPath, "TrainVal")
+    if not os.path.exists(train_val_dir) or not os.listdir(train_val_dir):
+        print("🚀 Output directory empty or missing. Starting data preprocessing and augmentation...")
+        processor.execute()
+    else:
+        print("✅ Preprocessed data detected. Skipping augmentation pipeline.")
     
     # 1. Get the complete DataFrame with augmented data
     trainingData, validationData, val_df_complete = processor.getDatas()
     testData = processor.getTestData()
 
     # 2. Filter the validation DataFrame to use only clean images (no augmentation)
-    # This regex looks for 'resizedImage' inside the path, handling both Windows (\) and Linux (/) separators
     print(f"\n- Original Validation Set Size (Augmented): {len(val_df_complete)}")
     
-    # Assuming 'resizedImage' is the folder for clean images. 
-    # Update regex if your folder structure is different.
     val_df_filtered = val_df_complete[val_df_complete['filepath'].str.contains(r'[/\\]resizedImage[/\\]', regex=True)]
     
     print(f"- Clean Validation Set Size (No Augmentation): {len(val_df_filtered)}")
