@@ -23,14 +23,15 @@ pip install -r requirements.txt
 ```
 ## 🚀 Usage
 1. Dataset Setup
-Ensure your dataset is organized as follows inside the dataset/ folder:
+Ensure your dataset is organized as follows inside the `dataset/` folder:
 
+```text
 dataset/
 ├── Healthy/
 ├── Mosaic/
 ├── Rust/
 ... (11 classes total)
-
+```
 2. Training & Evaluation
 To run the full pipeline (training, evaluation, and report generation), execute:
 ```Bash
