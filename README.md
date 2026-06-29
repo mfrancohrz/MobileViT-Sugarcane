@@ -66,6 +66,6 @@ F1-Score: 98.54%
 ## 🔗 Citation
 If you use this code or the proposed methodology in your research, please cite our manuscript:
 
-Note: This manuscript is currently under review at The Visual Computer. Citation details will be updated upon publication.
+Note: This manuscript is currently under review at Neural Computing and Applications. Citation details will be updated upon publication.
 
 DOI: 10.5281/zenodo.18378230
