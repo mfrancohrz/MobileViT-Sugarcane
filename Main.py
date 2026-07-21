@@ -1,25 +1,24 @@
 """
-    Script: Main.py
-    Description: 
-        This script coordinates the entire image processing pipeline, including
-        transformations, storage, and organization. Subsequently, it manages 
-        the training of specified models. Upon completion, it generates various 
-        plots to evaluate performance and produces a final report.
-    
-    Authors: Miguel Franco-Hernández, Vladimir Mejía-Domínguez, Yakdiel Rodriguez-Gallo
-    Version: 1.0.0 (Release)
+    Programa: Main.py
+    Descripcion: 
+        Este programa es el encargado de coordinar todo el proceso de procesamiento
+        de imagenes, tanto sus transformaciones como su posterior guardado y
+        almacenamiento. Posteriormente es el encargado de llevar a cabo el 
+        entrenamiento de los modelos especificados, donde al final de su desarrollo
+        debera proporcionar diferentes graficas que permitan la evoluacion de su
+        desempeno y un reporte final
+    Autor: Miguel Franco
+    Version: 5.0.0
 """
-
-from modules.Preprocessing import Transformation
-from modules.DataPreprocessor import DataPreprocessor
-from modules.PreTrained import Pretrained, PostPreprocessor
-# from modules.Trainer import Trainer
-# from modules.Displayer import Displayer
-# from modules.Report import Report
+from Modulos.Preprocessing import Transformation
+from Modulos.DataPreprocessor import DataPreprocessor
+from Modulos.PreTrained import Pretrained, PostPreprocessor
+from Modulos.Trainer import Trainer
+from Modulos.Displayer import Displayer
+from Modulos.Report import Report
 import time
 import cv2
 import os
-import argparse
 
 class Main:
     def __init__(self, inputPath, outputPath, test_percentage, excluded_dirs=[]):
@@ -30,16 +29,14 @@ class Main:
         self.testPath = os.path.join(outputPath, "Test")
 
     def getTestData(self):
-        """Retrieves the test set."""
+        """Obtiene el conjunto de testeo."""
         return self.postprocessor.getTestData()
 
     def execute(self):
-        """Executes image preprocessing and data augmentation."""
+        """Ejecuta el preprocesamiento y transformación de imágenes."""
         self.processor.getTestData()
         transformations = ["rotatedImage", "equalizedImage", "addNoise", "apply_variance_filter"]
 
-        # This loop applies data augmentation only to the Train/Val set (85%)
-        print("🚀 Starting data augmentation...")
         for class_name in os.listdir(self.processor.originalTrainValPath):
             class_path = os.path.join(self.processor.originalTrainValPath, class_name)
             for filename in os.listdir(class_path):
@@ -50,88 +47,74 @@ class Main:
 
                 transformed_images = self.transformation.apply_transformations(img, transformations, is_trainval=True)
                 self.transformation.save_transformed_images(transformed_images, class_name, filename)
-        print("✅ Data augmentation completed.")
 
     def getDatas(self):
-        """Retrieves training and validation data."""
+        """Obtiene los datos de entrenamiento y validación."""
         return self.pretrained.orderData()
 
-    def executeTraining(self, nameModel, trainingData, validationData, testData, val_df_filtered):
-        """Trains and saves models, then generates plots and reports."""
+    def executeTraining(self, nameModel, trainingData, validationData, testData, val_df_filtrado):
+        """Entrena y guarda los modelos, luego genera las gráficas y reportes."""
         for name in nameModel:
-            print(f"🚀 Processing {name}...")
+            print(f"\n🚀 Procesando {name}...")
 
-            if name == "MobileViT-v2-200":
-                # Lazy import to avoid dependency errors if Torch is not used for other models
-                from modules.TrainerTorch import TrainerTorch
+            # AQUI ESTA LA CORRECCION: Agregamos los nuevos modelos a la lista de PyTorch
+            if name in ["mobilevitv2_100", "efficientnet_b0", "convnext_tiny", "efficientformer_l1", "edgenext_xx_small"]:
+                from TrainerTorch import TrainerTorch
                 
                 torchTrainer = TrainerTorch(
                     train_dir=os.path.join(self.processor.originalTrainValPath),
                     test_dir=self.testPath,
-                    num_classes=11
+                    model_name=name,
+                    num_classes=11,
+                    batch_size=8,
+                    image_size=224
                 )
 
-                # Loads the model and prints the TEST set report
-                print(f"📊 Evaluating {name} on Test Set...")
+                # Controla el flujo de entrenamiento (Inicia o retoma si hay backups)
+                torchTrainer.resume_training(total_epochs=55)
+
+                # Evalúa con la data de Test e imprime el reporte final
                 torchTrainer.evaluate_only()
 
-                # Generates the text report and plots for the VALIDATION set
-                print(f"📊 Generating validation results for {name}...")
-                torchTrainer.generate_validation_results(val_df_filtered, torchTrainer.class_names)
+                # Genera y guarda reportes y matrices para la data de validación limpia
+                torchTrainer.generate_validation_results(val_df_filtrado, torchTrainer.class_names)
 
-                print("\n✅ Reports and validation plots generated successfully.")
-                continue
+                print(f"✅ Reportes y gráficas finalizados para {name}.")
+                continue # Este continue es vital para que no pase a Keras
 
-        print("✅ All requested models have been processed.")
+            # Este bloque inferior solo se ejecutará si pones modelos clásicos (Ej. DenseNet201)
+            trainer = Trainer(trainingData, validationData)
+            model = trainer.builderModel(name, load_existing=True)
+            if model is None:
+                model = trainer.builderModel(name)
+
+            start_time = time.time()
+            history = trainer.train(model, 200)
+            end_time = time.time()
+            trainer.save_model(model, name)
+
+        print("\n✅ Todos los modelos han sido procesados satisfactoriamente.")
 
 
 if __name__ == "__main__":
-    # Setup Argument Parser for command line flexibility
-    parser = argparse.ArgumentParser(description="Sugarcane Leaf Disease Classification Pipeline")
-    parser.add_argument('--input', type=str, default='./dataset', help='Path to the input dataset')
-    parser.add_argument('--output', type=str, default='./Output', help='Path to the output directory')
-    parser.add_argument('--test_split', type=int, default=15, help='Percentage of data to use for testing')
-    
-    args = parser.parse_args()
-
-    # Configuration
-    inputPath = args.input
-    outputPath = args.output
-    test_percentage = args.test_split
+    inputPath = r'D:\Documentos\Sugarcane_Paper\Dataset'
+    outputPath = r'D:\Documentos\Sugarcane_Paper\Output'
+    test_percentage = 15
     excluded_dirs = ["Original"]
-    nameModel = ["MobileViT-v2-200"]
-
-    # Ensure output directory exists
-    if not os.path.exists(outputPath):
-        os.makedirs(outputPath)
-
-    print(f"📂 Input Path: {inputPath}")
-    print(f"📂 Output Path: {outputPath}")
+    
+    nameModel = ["efficientformer_l1"]    # "edgenext_xx_small", "efficientformer_l1", "mobilevitv2_100", "efficientnet_b0", "convnext_tiny"
 
     processor = Main(inputPath, outputPath, test_percentage, excluded_dirs)
     
-    # Check if preprocessing pipeline needs to be run (First time setup)
-    train_val_dir = os.path.join(outputPath, "TrainVal")
-    if not os.path.exists(train_val_dir) or not os.listdir(train_val_dir):
-        print("🚀 Output directory empty or missing. Starting data preprocessing and augmentation...")
-        processor.execute()
-    else:
-        print("✅ Preprocessed data detected. Skipping augmentation pipeline.")
-    
-    # 1. Get the complete DataFrame with augmented data
-    trainingData, validationData, val_df_complete = processor.getDatas()
+    trainingData, validationData, val_df_completo = processor.getDatas()
     testData = processor.getTestData()
 
-    # 2. Filter the validation DataFrame to use only clean images (no augmentation)
-    print(f"\n- Original Validation Set Size (Augmented): {len(val_df_complete)}")
+    print(f"\n- Tamaño original del set de validación (con aumentos): {len(val_df_completo)}")
+    val_df_filtrado = val_df_completo[val_df_completo['filepath'].str.contains(r'\\resizedImage\\', regex=True)]
+    print(f"- Tamaño limpio del set de validación (sin aumentos): {len(val_df_filtrado)}")
     
-    val_df_filtered = val_df_complete[val_df_complete['filepath'].str.contains(r'[/\\]resizedImage[/\\]', regex=True)]
+    print("\n🚀 Procesamiento de datos completado")
     
-    print(f"- Clean Validation Set Size (No Augmentation): {len(val_df_filtered)}")
+    processor.executeTraining(nameModel, trainingData, validationData, testData, val_df_filtrado)
     
-    print("\n🚀 Data processing completed")
-    
-    # 3. Execute Training / Evaluation
-    processor.executeTraining(nameModel, trainingData, validationData, testData, val_df_filtered)
-    
-    print("🚀 Evaluation process completed")
+    print("🚀 Proceso de evaluación completado")
