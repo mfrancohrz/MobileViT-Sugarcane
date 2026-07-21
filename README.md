@@ -55,11 +55,9 @@ UMAP Embeddings:
 python UMAPViz.py --dataset "./Output/Test"
 ```
 ## 📊 Results
-The proposed model achieves state-of-the-art performance:
+The best model achieves the following performance:
 
-Accuracy: 98.57%
-
-F1-Score: 98.54%
+Accuracy: 96.45%
 
 (See the plots/ folder for Confusion Matrices and detailed metrics).
 
