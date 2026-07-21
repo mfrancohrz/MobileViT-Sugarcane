@@ -353,4 +353,3 @@ class TrainerTorch:
         plt.tight_layout()
         plt.savefig(os.path.join(self.plot_dir, "validation_normalized_confusion_matrix.png"), bbox_inches='tight')
         print(f"✅ Matriz de confusión normalizada de validación guardada.")
-        plt.show()
