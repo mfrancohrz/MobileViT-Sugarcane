@@ -1,12 +1,3 @@
-"""
-    Script: TorchReport.py
-    Description: Generates and saves a detailed classification report (Precision, Recall, F1-Score)
-                 for PyTorch models in text format.
-    
-    Authors: Miguel Franco-Hernández, Vladimir Mejía-Domínguez, Yakdiel Rodriguez-Gallo
-    Version: 1.0.0
-"""
-
 import os
 import torch
 from sklearn.metrics import classification_report
@@ -20,11 +11,11 @@ class TorchReport:
         self.class_names = class_names
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.report_dir = "reports"
+        self.report_dir = "reportes"
         os.makedirs(self.report_dir, exist_ok=True)
 
-    def _get_predictions(self):
-        """Internal helper to run inference on the test set."""
+    def generateReport(self, start_time, end_time):
+        """Genera y guarda el reporte del modelo como archivo .txt (versión PyTorch)."""
         self.model.eval()
         all_preds = []
         all_labels = []
@@ -36,42 +27,33 @@ class TorchReport:
                 _, preds = torch.max(outputs, 1)
                 all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(labels.numpy())
-        
-        return all_labels, all_preds
 
-    def generateReport(self, start_time, end_time):
-        """Generates and saves the model report as a .txt file."""
-        print(f"📝 Generating text report for {self.nameModel}...")
-        
-        y_true, y_pred = self._get_predictions()
-
-        # Generate report as dictionary
+        # Generar reporte como diccionario
         report_dict = classification_report(
-            y_true,
-            y_pred,
+            all_labels,
+            all_preds,
             target_names=self.class_names,
             output_dict=True
         )
 
-        # Convert to DataFrame and format to 4 decimal places
+        # Convertir a DataFrame y formatear a 4 decimales
         df_report = pd.DataFrame(report_dict).transpose()
-        report_content = df_report.to_string(float_format="{:.4f}".format)
+        reporte = df_report.to_string(float_format="{:.4f}".format)
 
         test_size = len(self.test_loader.dataset)
         batch_size = self.test_loader.batch_size
         execution_time = end_time - start_time
 
-        report_txt = (
-            f"📄 Model Report: {self.nameModel}\n\n"
-            f"🔹 Test Images: {test_size}\n"
-            f"🔹 Batch Size: {batch_size}\n"
-            f"🔹 Execution Time: {execution_time:.2f} seconds\n\n"
-            f"📊 Classification Report:\n{report_content}\n"
+        reporte_txt = (
+            f"\U0001F4C4 Reporte del modelo: {self.nameModel}\n\n"
+            f"\U0001F539 Test Images: {test_size}\n"
+            f"\U0001F539 Batch Size: {batch_size}\n"
+            f"\U0001F539 Execution Time: {execution_time:.2f} seconds\n\n"
+            f"\U0001F4CA Classification Report:\n{reporte}\n"
         )
 
         report_path = os.path.join(self.report_dir, f"{self.nameModel}_report.txt")
-        
-        with open(report_path, 'w', encoding='utf-8') as report_file:
-            report_file.write(report_txt)
+        with open(report_path, 'w') as report_file:
+            report_file.write(reporte_txt)
 
-        print(f"✅ Report saved to {report_path}\n")
+        print(f"✅ Reporte guardado en {report_path}\n")

@@ -1,14 +1,7 @@
-"""
-    Script: TrainerTorch.py
-    Description: Handles the training, evaluation, and visualization pipeline 
-                 specifically for the MobileViT architecture using PyTorch.
-    
-    Authors: Miguel Franco-Hernández, Vladimir Mejía-Domínguez, Yakdiel Rodriguez-Gallo
-    Version: 1.0.0
-"""
-
 import os
 import time
+import glob
+import shutil
 import torch
 import timm
 import torchvision.transforms as transforms
@@ -19,30 +12,54 @@ from sklearn.metrics import confusion_matrix, classification_report
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
-from PIL import Image
 import pandas as pd
 import numpy as np
+from PIL import Image
+import csv
 
 class TrainerTorch:
-    def __init__(self, train_dir, test_dir, num_classes=11, batch_size=16, image_size=256):
+    def __init__(self, train_dir, test_dir, model_name="mobilevitv2_200", num_classes=11, batch_size=16, image_size=256):
         self.train_dir = train_dir
         self.test_dir = test_dir
         self.batch_size = batch_size
         self.num_classes = num_classes
         self.image_size = image_size
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
-        self.nameModel = "MobileViT-v2-200"
+        # ⚠️ Fijado a CPU para evitar saturación de la gráfica
+        self.device = torch.device('cpu')
         
-        # Setup output directories
-        self.plot_dir = os.path.join("plots", self.nameModel)
-        self.model_dir = "models"
+        self.nameModel = model_name 
+        self.plot_dir = os.path.join("graficos", self.nameModel)
+        
+        self.models_dir = os.path.join("models", self.nameModel)
+        self.report_dir = os.path.join("reportes", self.nameModel)
         
         os.makedirs(self.plot_dir, exist_ok=True)
-        os.makedirs(self.model_dir, exist_ok=True)
+        os.makedirs(self.models_dir, exist_ok=True)
+        os.makedirs(self.report_dir, exist_ok=True)
+        
+        old_checkpoints = glob.glob(os.path.join("models", f"{self.nameModel}_*.pt"))
+        for old_file in old_checkpoints:
+            if os.path.isfile(old_file):
+                try:
+                    shutil.move(old_file, os.path.join(self.models_dir, os.path.basename(old_file)))
+                    print(f"📁 Backup movido a su nueva subcarpeta: {os.path.basename(old_file)}")
+                except Exception:
+                    pass
+                    
+        old_reports = glob.glob(os.path.join("reportes", f"{self.nameModel}_*.txt"))
+        for old_file in old_reports:
+            if os.path.isfile(old_file):
+                try:
+                    new_name = os.path.basename(old_file).replace(f"{self.nameModel}_", "")
+                    shutil.move(old_file, os.path.join(self.report_dir, new_name))
+                    print(f"📄 Reporte movido y renombrado en su nueva subcarpeta: {new_name}")
+                except Exception:
+                    pass
+        
+        self.history_file = os.path.join(self.plot_dir, f"{self.nameModel}_history.csv")
 
     def prepare_data(self):
-        """Loads and transforms the datasets for training and testing."""
         transform = transforms.Compose([
             transforms.Resize((self.image_size, self.image_size)),
             transforms.ToTensor(),
@@ -57,51 +74,83 @@ class TrainerTorch:
         self.class_names = train_data.classes
 
     def build_model(self):
-        """Initializes the MobileViT architecture with pretrained weights."""
-        model = timm.create_model('mobilevitv2_200', pretrained=True)
-        model.reset_classifier(self.num_classes)
+        model = timm.create_model(self.nameModel, pretrained=True, num_classes=self.num_classes)
         return model
 
-    def load_model(self):
-        """Loads a previously saved model checkpoint."""
-        model = self.build_model().to(self.device)
-        model_path = os.path.join(self.model_dir, f"{self.nameModel}.pt")
+    def get_latest_checkpoint(self):
+        checkpoints = glob.glob(os.path.join(self.models_dir, f"{self.nameModel}_epoch_*.pt"))
+        if not checkpoints:
+            return None, 0
         
-        if os.path.exists(model_path):
-            model.load_state_dict(torch.load(model_path, map_location=self.device))
-            print("✅ Model loaded successfully from checkpoint.")
-        else:
-            print(f"⚠️ Checkpoint not found at {model_path}")
+        latest_cp = max(checkpoints, key=lambda x: int(x.split('_epoch_')[-1].split('.pt')[0]))
+        epoch = int(latest_cp.split('_epoch_')[-1].split('.pt')[0])
+        return latest_cp, epoch
+
+    def load_model(self, checkpoint_path=None):
+        model = self.build_model().to(self.device)
+        if checkpoint_path is None:
+            checkpoint_path = os.path.join(self.models_dir, f"{self.nameModel}_final.pt")
             
+        if os.path.exists(checkpoint_path):
+            # ⚠️ CORRECCIÓN: Obligar a cargar en el dispositivo actual (CPU)
+            model.load_state_dict(torch.load(checkpoint_path, map_location=self.device))
+            print(f"✅ Modelo cargado desde {checkpoint_path}")
+        else:
+            print(f"⚠️ No se encontró checkpoint en {checkpoint_path}")
         return model
 
-    def train(self, epochs=50, lr=0.001, continue_training=False, start_epoch=0):
-        """Main training loop."""
+    def resume_training(self, total_epochs=55):
+        latest_cp, start_epoch = self.get_latest_checkpoint()
+
+        if latest_cp and start_epoch < total_epochs:
+            print(f"🔄 Retomando entrenamiento desde la época {start_epoch} (Archivo: {latest_cp})...")
+            self.train(epochs=total_epochs, continue_training=True, start_epoch=start_epoch, checkpoint_path=latest_cp)
+        elif start_epoch >= total_epochs or os.path.exists(os.path.join(self.models_dir, f"{self.nameModel}_final.pt")):
+            print(f"✅ El modelo {self.nameModel} ya ha completado su entrenamiento.")
+            self.model = self.load_model()
+        else:
+            print(f"🆕 Iniciando entrenamiento para {self.nameModel} desde cero...")
+            self.train(epochs=total_epochs, continue_training=False, start_epoch=0)
+
+    def train(self, epochs=55, continue_training=False, start_epoch=0, checkpoint_path=None):
         self.prepare_data()
 
-        if continue_training:
-            model = self.load_model()
+        if continue_training and checkpoint_path:
+            model = self.load_model(checkpoint_path)
         else:
             model = self.build_model().to(self.device)
 
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(model.parameters(), lr=lr)
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
 
         history_loss = []
         history_acc = []
 
-        for i in range(epochs):
-            epoch = start_epoch + i
+        if continue_training and os.path.exists(self.history_file):
+            try:
+                df_hist = pd.read_csv(self.history_file)
+                history_loss = df_hist['loss'].tolist()
+                history_acc = df_hist['accuracy'].tolist()
+                print(f"📊 Historial de gráficas recuperado: {len(history_loss)} épocas previas.")
+            except Exception as e:
+                print(f"⚠️ No se pudo leer el historial previo: {e}")
+        elif not continue_training:
+            with open(self.history_file, mode='w', newline='') as f:
+                f.write("epoch,loss,accuracy\n")
+
+        for epoch in range(start_epoch, epochs):
+            current_lr = 0.001 if epoch < 50 else 0.0001
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = current_lr
+
             model.train()
             running_loss = 0.0
             correct = 0
             total = 0
-            
-            print(f"\n⏳ Epoch {i+1}/{epochs} (Global Epoch: {epoch+1})")
+            print(f"\n⏳ Época {epoch+1}/{epochs} | Learning Rate: {current_lr}")
             epoch_start = time.time()
 
-            # Training loop with progress bar
-            for images, labels in tqdm(self.train_loader, desc=f"Training epoch {epoch+1}", leave=False):
+            for images, labels in tqdm(self.train_loader, desc=f"Entrenando época {epoch+1}", leave=False):
                 images = images.to(self.device)
                 labels = labels.to(self.device)
 
@@ -117,26 +166,35 @@ class TrainerTorch:
                 total += labels.size(0)
 
             acc = correct / total
-            avg_loss = running_loss / len(self.train_loader)
+            epoch_loss = running_loss / len(self.train_loader)
             
-            history_loss.append(avg_loss)
+            history_loss.append(epoch_loss)
             history_acc.append(acc)
 
-            print(f"✅ Epoch {epoch+1} completed in {time.time() - epoch_start:.2f}s — Loss: {avg_loss:.4f}, Accuracy: {acc:.4f}")
+            with open(self.history_file, mode='a', newline='') as f:
+                f.write(f"{epoch+1},{epoch_loss},{acc}\n")
+
+            print(f"✅ Época {epoch+1} completada en {time.time() - epoch_start:.2f}s — Loss: {running_loss:.4f}, Accuracy: {acc:.4f}")
+
+            if (epoch + 1) % 5 == 0:
+                backup_path = os.path.join(self.models_dir, f"{self.nameModel}_epoch_{epoch+1}.pt")
+                torch.save(model.state_dict(), backup_path)
+                print(f"💾 Backup de seguridad guardado: {backup_path}")
 
         self.model = model
-        self.save_model(model)
+        final_path = os.path.join(self.models_dir, f"{self.nameModel}_final.pt")
+        torch.save(model.state_dict(), final_path)
+        print(f"🏁 Entrenamiento completado. Modelo final guardado en {final_path}")
+        
         self.plot_training_metrics(history_loss, history_acc)
         self.evaluate(model)
 
     def save_model(self, model):
-        """Saves the model state dictionary."""
-        save_path = os.path.join(self.model_dir, f"{self.nameModel}.pt")
-        torch.save(model.state_dict(), save_path)
-        print(f"✅ Model saved to {save_path}")
+        os.makedirs(self.models_dir, exist_ok=True)
+        torch.save(model.state_dict(), os.path.join(self.models_dir, f"{self.nameModel}_final.pt"))
+        print(f"✅ Modelo guardado en {self.models_dir}/{self.nameModel}_final.pt")
 
     def plot_training_metrics(self, loss_list, acc_list):
-        """Generates and saves the training loss and accuracy plots."""
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
         ax1.plot(loss_list, label='Loss')
@@ -153,23 +211,22 @@ class TrainerTorch:
 
         plt.tight_layout()
         save_path = os.path.join(self.plot_dir, "training_metrics.png")
-        plt.savefig(save_path)
-        print(f"📈 Training metrics plot saved to {save_path}")
-        # plt.show() # Uncomment if running in notebook
+        plt.savefig(save_path, bbox_inches='tight')
+        print(f"📈 Gráfica de entrenamiento guardada en {save_path}")
+        plt.show()
 
     def evaluate(self, model):
-        """Evaluates the model on the test set and prints a classification report."""
         model.eval()
         all_preds = []
         all_labels = []
 
         with torch.no_grad():
-            for images, labels in self.test_loader:
+            for images, labels in tqdm(self.test_loader, desc="Evaluando Test"):
                 images = images.to(self.device)
                 outputs = model(images)
                 _, preds = torch.max(outputs, 1)
                 all_preds.extend(preds.cpu().numpy())
-                all_labels.extend(labels.numpy())
+                all_labels.extend(labels.cpu().numpy())
 
         report_dict = classification_report(
             all_labels,
@@ -179,96 +236,121 @@ class TrainerTorch:
         )
 
         df_report = pd.DataFrame(report_dict).transpose()
-        print("\n📋 Test Set Classification Report:\n")
-        print(df_report.to_string(float_format="{:.4f}".format))
+        reporte_formateado = df_report.to_string(float_format="{:.4f}".format)
+
+        print("\n📋 Reporte de clasificación (TEST):\n")
+        print(reporte_formateado)
+        
+        report_path = os.path.join(self.report_dir, "reporte_test.txt")
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(f"Reporte de Clasificación (TEST) - {self.nameModel}\n\n")
+            f.write(reporte_formateado)
+        print(f"📄 Reporte de Test guardado en: {report_path}")
+        
+        cm = confusion_matrix(all_labels, all_preds)
+        fig, ax = plt.subplots(figsize=(7, 7)) 
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=self.class_names, yticklabels=self.class_names, ax=ax)
+        ax.set_xlabel("Predicted Label")
+        ax.set_ylabel("True Label")
+        ax.set_title(f"Confusion Matrix (Test) - {self.nameModel}")
+        
+        plt.xticks(rotation=45, ha="right")
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.plot_dir, "test_confusion_matrix.png"), bbox_inches='tight')
+        print(f"✅ Matriz de confusión de TEST guardada.")
+        plt.show()
+
+        cm_normalized = cm.astype('float') / (cm.sum(axis=1, keepdims=True) + 1e-9)
+        fig, ax = plt.subplots(figsize=(7, 7))
+        sns.heatmap(cm_normalized, annot=True, fmt='.2f', cmap='Blues', xticklabels=self.class_names, yticklabels=self.class_names, ax=ax)
+        ax.set_xlabel("Predicted Label")
+        ax.set_ylabel("True Label")
+        ax.set_title(f"Normalized Confusion Matrix (Test) - {self.nameModel}")
+        
+        plt.xticks(rotation=45, ha="right")
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.plot_dir, "test_normalized_confusion_matrix.png"), bbox_inches='tight')
+        print(f"✅ Matriz de confusión normalizada de TEST guardada.")
+        plt.show()
 
     def evaluate_only(self):
-        """Wrapper to evaluate a loaded model without training."""
         self.prepare_data()
         model = self.load_model()
         self.model = model
         self.evaluate(model)
         
     def generate_validation_results(self, df, class_names):
-        """
-        Evaluates a specific DataFrame (Validation Set), prints the report,
-        and generates confusion matrices.
-        """
-        
-        # Internal Dataset class for DataFrame handling
         class CustomDataset(Dataset):
-            def __init__(self, dataframe, transform=None, class_to_idx=None):
+            def __init__(self, dataframe, transform=None):
                 self.dataframe = dataframe
                 self.transform = transform
-                self.class_to_idx = class_to_idx
-                
+                self.class_to_idx = {cls_name: i for i, cls_name in enumerate(class_names)}
             def __len__(self):
                 return len(self.dataframe)
-                
             def __getitem__(self, idx):
                 img_path = self.dataframe.iloc[idx]['filepath']
                 label_name = self.dataframe.iloc[idx]['label']
                 label_idx = self.class_to_idx[label_name]
-                
                 image = Image.open(img_path).convert('RGB')
                 if self.transform:
                     image = self.transform(image)
                 return image, label_idx
 
-        # Map class names to indices
-        class_to_idx = {cls_name: i for i, cls_name in enumerate(class_names)}
-        
         transform = transforms.Compose([
             transforms.Resize((self.image_size, self.image_size)),
             transforms.ToTensor(),
             transforms.Normalize([0.5]*3, [0.5]*3)
         ])
         
-        validation_dataset = CustomDataset(df, transform=transform, class_to_idx=class_to_idx)
+        validation_dataset = CustomDataset(df, transform=transform)
         validation_loader = DataLoader(validation_dataset, batch_size=self.batch_size, shuffle=False)
 
-        # --- Inference Loop ---
         self.model.eval()
         all_preds, all_labels = [], []
-        
-        print("\n🔄 Starting Validation Set Evaluation...")
         with torch.no_grad():
-            for images, labels in tqdm(validation_loader, desc="Evaluating Validation Set"):
+            for images, labels in tqdm(validation_loader, desc="Evaluando Validación"):
                 images = images.to(self.device)
                 labels = labels.to(self.device)
                 outputs = self.model(images)
                 _, preds = torch.max(outputs, 1)
                 all_preds.extend(preds.cpu().numpy())
-                all_labels.extend(labels.numpy())
+                all_labels.extend(labels.cpu().numpy())
 
-        # --- Text Report ---
         report_dict = classification_report(all_labels, all_preds, target_names=class_names, output_dict=True)
         df_report = pd.DataFrame(report_dict).transpose()
-        print("\n\n📋 VALIDATION Set Classification Report:\n")
-        print(df_report.to_string(float_format="{:.4f}".format))
+        reporte_formateado = df_report.to_string(float_format="{:.4f}".format)
+        
+        print("\n\n📋 Reporte de Clasificación (VALIDACIÓN):\n")
+        print(reporte_formateado)
 
-        # --- Confusion Matrix Plot ---
+        report_path = os.path.join(self.report_dir, "reporte_validacion.txt")
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(f"Reporte de Clasificación (VALIDACIÓN) - {self.nameModel}\n\n")
+            f.write(reporte_formateado)
+        print(f"📄 Reporte de Validación guardado en: {report_path}")
+
         cm = confusion_matrix(all_labels, all_preds)
-        fig, ax = plt.subplots(figsize=(10, 8))
+        fig, ax = plt.subplots(figsize=(7, 7))
         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=class_names, yticklabels=class_names, ax=ax)
         ax.set_xlabel("Predicted Label")
         ax.set_ylabel("True Label")
-        ax.set_title(f"Confusion Matrix (Validation) - {self.nameModel}")
+        ax.set_title(f"Confusion Matrix (Val) - {self.nameModel}")
         
-        save_path_cm = os.path.join(self.plot_dir, "validation_confusion_matrix.png")
-        plt.savefig(save_path_cm)
-        print(f"\n✅ Validation Confusion Matrix saved to {save_path_cm}")
-        # plt.show()
+        plt.xticks(rotation=45, ha="right")
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.plot_dir, "validation_confusion_matrix.png"), bbox_inches='tight')
+        print(f"\n✅ Matriz de confusión de validación guardada.")
+        plt.show()
 
-        # --- Normalized Confusion Matrix Plot ---
         cm_normalized = cm.astype('float') / (cm.sum(axis=1, keepdims=True) + 1e-9)
-        fig, ax = plt.subplots(figsize=(10, 8))
+        fig, ax = plt.subplots(figsize=(7, 7))
         sns.heatmap(cm_normalized, annot=True, fmt='.2f', cmap='Blues', xticklabels=class_names, yticklabels=class_names, ax=ax)
         ax.set_xlabel("Predicted Label")
         ax.set_ylabel("True Label")
-        ax.set_title(f"Normalized Confusion Matrix (Validation) - {self.nameModel}")
+        ax.set_title(f"Normalized Confusion Matrix (Val) - {self.nameModel}")
         
-        save_path_norm = os.path.join(self.plot_dir, "validation_normalized_confusion_matrix.png")
-        plt.savefig(save_path_norm)
-        print(f"✅ Validation Normalized Matrix saved to {save_path_norm}")
-        # plt.show()
+        plt.xticks(rotation=45, ha="right")
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.plot_dir, "validation_normalized_confusion_matrix.png"), bbox_inches='tight')
+        print(f"✅ Matriz de confusión normalizada de validación guardada.")
+        plt.show()
