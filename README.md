@@ -1,7 +1,7 @@
-# Precision Agriculture: MobileViT-Based Classification of Sugarcane Leaf Diseases
+# Benchmarking Vision Transformers and Convolutional Networks for Sugarcane Leaf Disease Classification on a Consolidated Multi-Source Dataset
 [![DOI](https://zenodo.org/badge/1142228645.svg)](https://doi.org/10.5281/zenodo.18378229)
 
-This repository contains the official implementation of the paper **"Precision Agriculture: MobileViT-Based Classification of Sugarcane Leaf Diseases"**, submitted to *Neural Computing and Applications*.
+This repository contains the official implementation of the paper **"Benchmarking Vision Transformers and Convolutional Networks for Sugarcane Leaf Disease Classification on a Consolidated Multi-Source Dataset"**, submitted to *Neural Computing and Applications*.
 
 This project introduces a deep learning approach using **MobileViT-v2-200** to classify 11 categories of sugarcane health conditions with high precision (98.57%), optimized for mobile and resource-constrained devices.
 
