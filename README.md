@@ -3,7 +3,7 @@
 
 This repository contains the official implementation of the paper **"Benchmarking Vision Transformers and Convolutional Networks for Sugarcane Leaf Disease Classification on a Consolidated Multi-Source Dataset"**, submitted to *Neural Computing and Applications*.
 
-This project introduces a deep learning approach using **MobileViT-v2-200** to classify 11 categories of sugarcane health conditions with high precision (98.57%), optimized for mobile and resource-constrained devices.
+This project introduces a deep learning approach using **MobileViT-v2-100** to classify 11 categories of sugarcane health conditions with high precision (96.45%), optimized for mobile and resource-constrained devices.
 
 ## 📂 Repository Structure
 
